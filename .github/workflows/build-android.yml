@@ -1,10 +1,10 @@
 
-name: Build Ayham Football Android APK
+name: Build Ayham Football APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [ "main", "master" ]
+    branches: [main, master]
 
 jobs:
   build:
@@ -14,16 +14,30 @@ jobs:
       image: barichello/godot-ci:4.4.1
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare output folder
-        run: mkdir -p build
+      - name: Find Godot project
+        shell: bash
+        run: |
+          PROJECT_FILE=$(find . -name project.godot -not -path './.git/*' -print -quit)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: project.godot was not found!"
+            echo "Repository files:"
+            find . -maxdepth 4 -type f | head -200
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Found project at: $PROJECT_DIR"
 
       - name: Import project resources
-        run: godot --headless --editor --path . --quit
+        run: |
+          godot --headless --editor --path "$PROJECT_DIR" --quit
 
-      - name: Create temporary debug keystore
+      - name: Create debug keystore
         run: |
           keytool -genkeypair -v \
             -keystore debug.keystore \
@@ -37,11 +51,14 @@ jobs:
 
       - name: Export Android APK
         run: |
-          godot --headless --path . --export-debug "Android" build/AyhamFootball.apk
+          mkdir -p "$PROJECT_DIR/build"
+          godot --headless --path "$PROJECT_DIR" \
+            --export-debug "Android" \
+            "$PROJECT_DIR/build/AyhamFootball.apk"
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Ayham-Football-Android-APK
-          path: build/AyhamFootball.apk
+          path: "**/AyhamFootball.apk"
           if-no-files-found: error
