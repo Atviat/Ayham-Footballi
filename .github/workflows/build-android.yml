@@ -4,9 +4,7 @@ name: Build Ayham Football APK
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
 
 jobs:
   build:
@@ -28,15 +26,11 @@ jobs:
           ZIP_FILE=$(find . -maxdepth 3 -type f -iname "*.zip" -not -path "./.git/*" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found!"
+            echo "ERROR: ZIP file not found"
             exit 1
           fi
 
-          echo "Found ZIP: $ZIP_FILE"
           unzip -o "$ZIP_FILE" -d game-project
-
-          echo "Extracted project files:"
-          find game-project -maxdepth 5 -type f | head -100
 
       - name: Find Godot project
         shell: bash
@@ -44,23 +38,44 @@ jobs:
           PROJECT_FILE=$(find game-project -name project.godot -print -quit)
 
           if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: project.godot not found inside ZIP!"
+            echo "ERROR: project.godot not found"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PROJECT_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project: $PROJECT_DIR"
 
-          echo "Godot project found: $PROJECT_DIR"
+      - name: Install Godot export templates
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.4.1.stable"
+
+          wget -q \
+            https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz \
+            -O /tmp/godot-templates.tpz
+
+          mkdir -p /tmp/godot-templates
+          unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
+
+          TEMPLATE_DIR=$(find /tmp/godot-templates -type f -name android_debug.apk -print -quit | xargs dirname)
+
+          if [ -z "$TEMPLATE_DIR" ]; then
+            echo "ERROR: Android export templates not found"
+            find /tmp/godot-templates -maxdepth 3 -type f
+            exit 1
+          fi
+
+          cp -a "$TEMPLATE_DIR/." "$HOME/.local/share/godot/export_templates/4.4.1.stable/"
 
       - name: Import project resources
         run: |
           godot --headless --editor --path "$PROJECT_DIR" --quit
 
-      - name: Create debug keystore
+      - name: Create Android debug keystore
         run: |
           keytool -genkeypair -v \
-            -keystore debug.keystore \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
             -storepass android \
             -alias AndroidDebugKey \
             -keypass android \
@@ -68,6 +83,41 @@ jobs:
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=Ayham Football,O=Ayham,C=IQ"
+
+      - name: Configure Android SDK and Java
+        shell: bash
+        run: |
+          ANDROID_JAR=$(find / -type f -path '*/platforms/android-*/android.jar' -print -quit 2>/dev/null)
+
+          if [ -z "$ANDROID_JAR" ]; then
+            echo "ERROR: Android SDK platform not found"
+            exit 1
+          fi
+
+          ANDROID_SDK=$(dirname "$(dirname "$(dirname "$ANDROID_JAR")")")
+
+          JAVAC=$(command -v javac)
+
+          if [ -z "$JAVAC" ]; then
+            echo "ERROR: Java compiler not found"
+            exit 1
+          fi
+
+          JAVA_HOME=$(dirname "$(dirname "$(readlink -f "$JAVAC")")")
+
+          mkdir -p "$HOME/.config/godot"
+
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [export]
+          android/android_sdk_path = "$ANDROID_SDK"
+          android/java_sdk_path = "$JAVA_HOME"
+          android/debug_keystore = "$GITHUB_WORKSPACE/debug.keystore"
+          android/debug_keystore_user = "AndroidDebugKey"
+          android/debug_keystore_password = "android"
+          EOF
+
+          echo "Android SDK: $ANDROID_SDK"
+          echo "Java SDK: $JAVA_HOME"
 
       - name: Export Android APK
         run: |
@@ -80,7 +130,7 @@ jobs:
 
       - name: Verify APK
         run: |
-          test -f "$PROJECT_DIR/build/AyhamFootball.apk"
+          test -s "$PROJECT_DIR/build/AyhamFootball.apk"
           ls -lh "$PROJECT_DIR/build/AyhamFootball.apk"
 
       - name: Upload APK
