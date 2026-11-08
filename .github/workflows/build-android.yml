@@ -4,10 +4,13 @@ name: Build Ayham Football APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches:
+      - main
+      - master
 
 jobs:
   build:
+    name: Build Android TV APK
     runs-on: ubuntu-latest
 
     container:
@@ -20,21 +23,20 @@ jobs:
       - name: Extract ZIP project
         shell: bash
         run: |
-          python3 - <<'PY'
-          import glob
-          import zipfile
-          import os
+          mkdir -p game-project
 
-          files = glob.glob("*.zip")
-          if not files:
-              raise SystemExit("ERROR: No ZIP file found in repository root")
+          ZIP_FILE=$(find . -maxdepth 3 -type f -iname "*.zip" -not -path "./.git/*" | head -n 1)
 
-          archive = files[0]
-          print("Extracting:", archive)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: ZIP file not found!"
+            exit 1
+          fi
 
-          with zipfile.ZipFile(archive) as z:
-              z.extractall("game-project")
-          PY
+          echo "Found ZIP: $ZIP_FILE"
+          unzip -o "$ZIP_FILE" -d game-project
+
+          echo "Extracted project files:"
+          find game-project -maxdepth 5 -type f | head -100
 
       - name: Find Godot project
         shell: bash
@@ -42,16 +44,18 @@ jobs:
           PROJECT_FILE=$(find game-project -name project.godot -print -quit)
 
           if [ -z "$PROJECT_FILE" ]; then
-            echo "ERROR: project.godot not found inside ZIP"
-            find game-project -maxdepth 4 -type f
+            echo "ERROR: project.godot not found inside ZIP!"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PROJECT_FILE")
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Import resources
-        run: godot --headless --editor --path "$PROJECT_DIR" --quit
+          echo "Godot project found: $PROJECT_DIR"
+
+      - name: Import project resources
+        run: |
+          godot --headless --editor --path "$PROJECT_DIR" --quit
 
       - name: Create debug keystore
         run: |
@@ -65,16 +69,23 @@ jobs:
             -validity 10000 \
             -dname "CN=Ayham Football,O=Ayham,C=IQ"
 
-      - name: Export APK
+      - name: Export Android APK
         run: |
           mkdir -p "$PROJECT_DIR/build"
-          godot --headless --path "$PROJECT_DIR" \
+
+          godot --headless \
+            --path "$PROJECT_DIR" \
             --export-debug "Android" \
             "$PROJECT_DIR/build/AyhamFootball.apk"
+
+      - name: Verify APK
+        run: |
+          test -f "$PROJECT_DIR/build/AyhamFootball.apk"
+          ls -lh "$PROJECT_DIR/build/AyhamFootball.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Ayham-Football-APK
-          path: game-project/**/*.apk
+          name: Ayham-Football-Android-APK
+          path: game-project/**/build/AyhamFootball.apk
           if-no-files-found: error
