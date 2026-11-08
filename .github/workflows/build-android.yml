@@ -1,32 +1,47 @@
 
-name: Build Ayham Football APK
+name: Build Ayham Football Android APK
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ "main", "master" ]
 
 jobs:
   build:
-    name: Build Android TV APK
     runs-on: ubuntu-latest
 
+    container:
+      image: barichello/godot-ci:4.4.1
+
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build APK with Godot
-        uses: firebelley/godot-export@v5
-        with:
-          godot_executable_download_url: https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_linux.x86_64.zip
-          godot_export_templates_download_url: https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz
-          relative_project_path: ./
-          archive_output: true
+      - name: Prepare output folder
+        run: mkdir -p build
 
-      - name: Upload APK
+      - name: Import project resources
+        run: godot --headless --editor --path . --quit
+
+      - name: Create temporary debug keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore debug.keystore \
+            -storepass android \
+            -alias AndroidDebugKey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Export Android APK
+        run: |
+          godot --headless --path . --export-debug "Android" build/AyhamFootball.apk
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Ayham-Football-Android
-          path: |
-            ./**/*.apk
+          name: Ayham-Football-Android-APK
+          path: build/AyhamFootball.apk
+          if-no-files-found: error
